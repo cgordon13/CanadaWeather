@@ -41,6 +41,7 @@ import ca.fwe.weather.backend.ForecastXMLParser;
 import ca.fwe.weather.backend.LocationDatabase;
 import ca.fwe.weather.backend.UserLocationsList;
 import ca.fwe.weather.core.CurrentConditions;
+import ca.fwe.weather.core.PointInTimeForecast;
 import ca.fwe.weather.core.Forecast;
 import ca.fwe.weather.core.ForecastItem;
 import ca.fwe.weather.core.ForecastLocation;
@@ -73,7 +74,6 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 	private NoDataAdapter noDataAdapter ;
 	protected int lang ;
 	private SharedPreferences prefs ;
-	private TextView fIssuedView ;
     private ListView listView;
     private SwipeRefreshLayout swipeLayout;
 	
@@ -83,18 +83,18 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 		super.onCreate(savedInstanceState);
 		this.setContentView(R.layout.forecast);
 
-        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        Toolbar toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
 		app = (WeatherApp) this.getApplication() ;
 		prefs = WeatherApp.prefs(this) ;
 		lang = WeatherApp.getLanguage(this) ;
-        drawer = (DrawerLayout)this.findViewById(R.id.forecast_drawer_layout);
-        ListView locationSpinner = (ListView) findViewById(R.id.forecast_left_drawer);
+        drawer = this.findViewById(R.id.forecast_drawer_layout);
+        ListView locationSpinner = findViewById(R.id.forecast_left_drawer);
 		forecastAdapter = new ForecastAdapter(this) ;
 		noDataAdapter = new NoDataAdapter() ;
 
-        swipeLayout = (SwipeRefreshLayout) findViewById(R.id.forecast_swiperefresh_container);
+        swipeLayout = findViewById(R.id.forecast_swiperefresh_container);
         swipeLayout.setOnRefreshListener(this);
 
         ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
@@ -115,16 +115,8 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
             }
         });
         onDownloadDialogShowing = false;
-		
-		fIssuedView = (TextView)this.getLayoutInflater().inflate(R.layout.forecast_headerfooter, null) ;
-		fIssuedView.setText(String.format(getString(R.string.forecast_issuedtext), getString(R.string.unknown)));
 
-        listView = (ListView)findViewById(android.R.id.list);
-		listView.addHeaderView(fIssuedView);
-		
-		TextView footer = (TextView)this.getLayoutInflater().inflate(R.layout.forecast_headerfooter, null) ;
-		footer.setText(R.string.forecast_footertext) ;
-		listView.addFooterView(footer);
+        listView = findViewById(android.R.id.list);
         listView.setOnItemClickListener(this) ;
 
 		if(app.upgrade()) {
@@ -244,7 +236,6 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 	protected void setLocation(ForecastLocation l, boolean forceDownload) {
         if (l == null) {
             listView.setAdapter(noDataAdapter);
-            fIssuedView.setText(String.format(getString(R.string.forecast_issuedtext), getString(R.string.unknown)));
             forecastAdapter.clear();
             try {
                 this.setTitle(this.getPackageManager()
@@ -265,7 +256,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
             //load cached version first
             Forecast cachedF = new Forecast(this, l, lang);
             cachedF.setUnitSet(unitset);
-            ForecastDownloader cachedLoader = new ForecastDownloader(cachedF, this, Modes.LOAD_CACHED);
+            ForecastDownloader cachedLoader = new ForecastDownloader(cachedF, this, Modes.LOAD_CACHED, true);
             log("starting cached forecast loader");
             cachedLoader.download();
 
@@ -275,7 +266,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
             if (forceDownload)
                 mode = Modes.FORCE_DOWNLOAD;
 
-            downloader = new ForecastDownloader(forecast, this, mode);
+            downloader = new ForecastDownloader(forecast, this, mode, true);
             log("starting downloader");
             downloader.download();
             onDownloadDialog.show();
@@ -305,20 +296,12 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 			break ;
 		case NO_CACHED_FORECAST_ERROR:
 			listView.setAdapter(noDataAdapter);
-			fIssuedView.setText(String.format(getString(R.string.forecast_issuedtext), getString(R.string.unknown)));
 			this.forecastAdapter.clear();
 			return ;
 		default:
 			log("forecast downloaded sucessfully, setting adapter.") ;
 			forecastAdapter.setForecast(forecast);
 			listView.setAdapter(forecastAdapter);
-			String dateText ;
-			if(forecast.getIssuedDate() != null)
-				dateText = forecast.getDateFormat().format(forecast.getIssuedDate()) ;
-			else
-				dateText = getString(R.string.unknown) ;
-			this.fIssuedView.setText(
-					String.format(getString(R.string.forecast_issuedtext), dateText));
 		}
 	}
 	
@@ -350,10 +333,8 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 	public void onItemClick(AdapterView<?> parent, View view, int position,
 			long id) {
 		log("processing click on item " + position) ;
-		if(forecastAdapter.getCount() > (position-1) && position >= 1) {
-			this.onItemClick(forecastAdapter.getItem(position-1)) ;
-		} else if(position == 0 || position == forecastAdapter.getCount()) {
-			log("first or last item click (ignoring)");
+		if(forecastAdapter.getCount() > position && position >= 0) {
+			this.onItemClick(forecastAdapter.getItem(position));
 		} else {
 			log("non-forecast adapter") ;
 		}
@@ -525,7 +506,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 
         private List<ActionForecastLocation> actions ;
 
-		public LocationsAdapter(Context context) {
+		LocationsAdapter(Context context) {
 			super(context);
             TypedValue a = new TypedValue();
             getTheme().resolveAttribute(android.R.attr.colorPressedHighlight, a, true);
@@ -585,7 +566,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 
 		}
 
-		public void addUri(Uri uri) {
+		void addUri(Uri uri) {
 			log("adding uri to userLocations " + uri) ;
 			ForecastLocation newLoc = userLocations.addLocation(uri) ;
 			if(newLoc != null) {
@@ -614,12 +595,12 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
             }
 		}
 
-        public void addAction(ActionForecastLocation l) {
+        void addAction(ActionForecastLocation l) {
             actions.add(l);
             this.notifyDataSetChanged();
         }
 
-        public int getNumLocations() {
+        int getNumLocations() {
             return this.getCount() - actions.size();
         }
 
@@ -627,7 +608,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
             this.selectedIndex = index;
         }
 
-		public ForecastLocation current() {
+		ForecastLocation current() {
             if(selectedIndex > -1 && selectedIndex < this.getNumLocations()) {
                 return this.getItem(selectedIndex) ;
             } else {
@@ -639,7 +620,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
 
 	private class NoDataAdapter extends ArrayAdapter<String> {
 
-		public NoDataAdapter() {
+		NoDataAdapter() {
 			super(ForecastActivity.this, android.R.layout.simple_list_item_1);
 			this.add(getString(R.string.forecast_no_data));
 		}
@@ -651,7 +632,7 @@ public abstract class ForecastActivity extends AppCompatActivity implements Fore
         private String text ;
         private Drawable icon ;
 
-        public ActionForecastLocation(String text, Drawable icon) {
+        ActionForecastLocation(String text, Drawable icon) {
             this.text = text ;
             this.icon = icon ;
             this.icon.setBounds(0,0, icon.getIntrinsicWidth(), icon.getIntrinsicHeight());
